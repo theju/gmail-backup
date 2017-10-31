@@ -7,7 +7,7 @@ It is powered by the [Gmail API](https://developers.google.com/gmail/api/guides/
 
 ## Prerequisites
 
-You need to create an application at the (Google Developer console)[https://console.developers.google.com/]
+You need to create an application at the [Google Developer console(https://console.developers.google.com/)
 before using the project. Create a new project and enable the Gmail API and create an OAuth
 client and obtain the client-id and client-secret.
 
