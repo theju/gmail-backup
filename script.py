@@ -143,7 +143,7 @@ def oauth_authorize(client_id, client_secret, redirect_uri):
 
     refresh_token = json_resp['refresh_token']
     args = (client_id, client_secret, refresh_token)
-    loop.call_later((json_resp['expires_in'] - 300)/1000, oauth_renew, *args)
+    loop.call_later((json_resp['expires_in'] - 300), oauth_renew, *args)
 
 
 def oauth_renew(client_id, client_secret, refresh_token):
@@ -163,7 +163,7 @@ def oauth_renew(client_id, client_secret, refresh_token):
     for (key, val) in json_resp.items():
         TOKEN[key] = val
     args = (client_id, client_secret, refresh_token)
-    loop.call_later((json_resp['expires_in'] - 300)/1000, oauth_renew, *args)
+    loop.call_later((json_resp['expires_in'] - 300), oauth_renew, *args)
 
 
 if __name__ == '__main__':
