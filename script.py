@@ -1,12 +1,18 @@
-import time
 import email
 import base64
 import random
 import mailbox
 import logging
+import asyncio
 import requests
 import argparse
 from urllib.parse import urlencode
+
+TOKEN = {}
+loop = asyncio.get_event_loop()
+
+class ResponseException(Exception):
+    pass
 
 
 def main():
@@ -19,8 +25,6 @@ def main():
                         dest='client_secret', help='Google Client secret')
     parser.add_argument('--redirect-uri', required=False,
                         dest='redirect_uri', help='OAuth redirect uri')
-    parser.add_argument('--access-token', required=False,
-                        dest='access_token', help='Existing access token (if any)')
     parser.add_argument('--search-query', required=True,
                         dest='search_query', help='Query to search messages')
     parser.add_argument('--output-dir', required=True,
@@ -33,50 +37,44 @@ def main():
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
-    if args.access_token:
-        access_token = args.access_token
-    else:
-        access_token = oauth_authorize(
-            args.client_id,
-            args.client_secret,
-            args.redirect_uri
-        )
+    oauth_authorize(
+        args.client_id,
+        args.client_secret,
+        args.redirect_uri
+    )
     params = {
-        "access_token": access_token,
-        "q": args.search_query
+        "access_token": TOKEN["access_token"],
+        "q": args.search_query,
+        "maxResults": 50,
     }
-    messages_list = []
-    while True:
-        time.sleep(0.5)
-        payload = search_messages(params)
-        for message in payload["messages"]:
-            messages_list.append(message["id"])
-        if payload.get("nextPageToken"):
-            params["pageToken"] = payload["nextPageToken"]
-        else:
-            break
 
     # Store in a output Maildir folder
     maildir = mailbox.Maildir(args.output_maildir)
+    session = requests.Session()
 
-    num_pages = int(len(messages_list) / 10 + 1)
-    for ii in range(num_pages):
-        logging.debug("Fetching page {0} of {1}".format(ii + 1, num_pages))
-        time.sleep(0.5)
-        messages = get_messages(
-            access_token,
-            messages_list[ii * 10 : ii * 10 + 10]
-        )
-        # Build a MaildirMessage
-        for raw_message in messages:
+    def _main():
+        payload = search_messages(session, params)
+        messages = [ii['id'] for ii in payload.get('messages', [])]
+        for msg_id in messages:
+            raw_message = get_message(session, msg_id)
+
+            # Build a MaildirMessage
             message = email.message_from_bytes(raw_message)
             msg = mailbox.MaildirMessage(message)
             msg.set_flags("S")
             maildir.add(msg)
 
+        if payload.get("nextPageToken"):
+            params["pageToken"] = payload["nextPageToken"]
+            loop.call_soon(_main)
+        else:
+            loop.stop()
+    loop.call_soon(_main)
+    loop.run_forever()
 
-def search_messages(params):
-    response = requests.get(
+
+def search_messages(session, params):
+    response = session.get(
         "https://www.googleapis.com/gmail/v1/"
         "users/me/messages?{0}".format(urlencode(params)),
         headers={
@@ -85,7 +83,7 @@ def search_messages(params):
         }
     )
     if not response.ok:
-        raise Exception(response.content)
+        raise ResponseException(response.json())
     json_resp = response.json()
     logging.debug(
         "Approximately {0} messages for {1} page token".format(
@@ -95,17 +93,22 @@ def search_messages(params):
     return json_resp
 
 
-def get_messages(access_token, msgs_id):
-    # TODO: Replace with batch request
-    for msg_id in msgs_id:
-        response = requests.get(
-            "https://www.googleapis.com/gmail/v1/users/me/messages/{0}?format=raw".format(msg_id),
-            headers={"Authorization": "Bearer {0}".format(access_token)}
-        )
-        if not response.ok:
-            continue
-        json_resp = response.json()
-        yield base64.urlsafe_b64decode(json_resp["raw"])
+def get_message(session, msg_id):
+    response = session.get(
+        "https://www.googleapis.com/gmail/v1/users/me/messages/{0}?format=raw".format(msg_id),
+        headers={"Authorization": "Bearer {0}".format(TOKEN['access_token'])}
+    )
+    if not response.ok:
+        raise ResponseException(response.json())
+    json_resp = response.json()
+    return base64.urlsafe_b64decode(json_resp["raw"])
+
+
+def store_messages(maildir, msgs):
+    if len(msgs) == 0:
+        return None
+
+    loop.call_soon(store_messages, *(maildir, msgs[1:]))
 
 
 def oauth_authorize(client_id, client_secret, redirect_uri):
@@ -125,16 +128,42 @@ def oauth_authorize(client_id, client_secret, redirect_uri):
         "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
+        "access_type": "offline",
         "code": auth_code
     }
     response = requests.post(
         "https://www.googleapis.com/oauth2/v4/token", data=auth_params
     )
+    json_resp = response.json()
     if not response.ok:
-        raise Exception(response.content)
-    logging.debug(response.json())
-    token = response.json()['access_token']
-    return token
+        raise ResponseException(json_resp)
+    logging.debug(json_resp)
+    for (key, val) in json_resp.items():
+        TOKEN[key] = val
+
+    refresh_token = json_resp['refresh_token']
+    args = (client_id, client_secret, refresh_token)
+    loop.call_later((json_resp['expires_in'] - 300)/1000, oauth_renew, *args)
+
+
+def oauth_renew(client_id, client_secret, refresh_token):
+    auth_params = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+    response = requests.post(
+        "https://www.googleapis.com/oauth2/v4/token", data=auth_params
+    )
+    json_resp = response.json()
+    if not response.ok:
+        raise ResponseException(json_resp)
+    logging.debug(json_resp)
+    for (key, val) in json_resp.items():
+        TOKEN[key] = val
+    args = (client_id, client_secret, refresh_token)
+    loop.call_later((json_resp['expires_in'] - 300)/1000, oauth_renew, *args)
 
 
 if __name__ == '__main__':
