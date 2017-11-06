@@ -43,9 +43,8 @@ def main():
         args.redirect_uri
     )
     params = {
-        "access_token": TOKEN["access_token"],
         "q": args.search_query,
-        "maxResults": 50,
+        "maxResults": 100,
     }
 
     # Store in a output Maildir folder
@@ -78,8 +77,9 @@ def search_messages(session, params):
         "https://www.googleapis.com/gmail/v1/"
         "users/me/messages?{0}".format(urlencode(params)),
         headers={
+            "Authorization": "Bearer {0}".format(TOKEN['access_token']),
             "Accept-Encoding": "gzip, deflate",
-            "User-Agent": "Gmail Backup (gzip)"
+            "User-Agent": "Gmail Backup (gzip)",
         }
     )
     if not response.ok:
@@ -96,7 +96,11 @@ def search_messages(session, params):
 def get_message(session, msg_id):
     response = session.get(
         "https://www.googleapis.com/gmail/v1/users/me/messages/{0}?format=raw".format(msg_id),
-        headers={"Authorization": "Bearer {0}".format(TOKEN['access_token'])}
+        headers={
+            "Authorization": "Bearer {0}".format(TOKEN['access_token']),
+            "Accept-Encoding": "gzip, deflate",
+            "User-Agent": "Gmail Backup (gzip)",
+        }
     )
     if not response.ok:
         raise ResponseException(response.json())
