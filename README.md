@@ -19,11 +19,11 @@ Install the requirements for the project located in the `requirements.txt`
 ```
 
 $ python script.py --client-id <client_id> --client-secret <client_secret> \
+                   --redirect-uri <redirect_uri> \
                    --search-query "before:2015/01/01 after:2014/01/01" \
                    [--debug] \
-                   --output-dir ~/gmail/2015
+                   --output-dir ~/gmail/2014
 
-URL is : https://accounts.google.com/o/oauth2/v2/auth?<rest_of_url>
 // Open the above URL in your browser and enter the parameter after the code argument
 // as the authorization code
 // For Example:
