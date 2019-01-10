@@ -1,3 +1,4 @@
+import os
 import email
 import base64
 import random
@@ -48,7 +49,9 @@ def main():
     }
 
     # Store in a output Maildir folder
-    maildir = mailbox.Maildir(args.output_maildir)
+    if not os.path.exists(args.output_maildir):
+        os.makedirs(args.output_maildir)
+    maildir = mailbox.Maildir(args.output_maildir, create=True)
     session = requests.Session()
 
     def _main():
@@ -122,7 +125,9 @@ def oauth_authorize(client_id, client_secret, redirect_uri):
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": "https://www.googleapis.com/auth/gmail.readonly",
-        "state": state
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent"
     })
     url = "https://accounts.google.com/o/oauth2/v2/auth?{0}".format(params)
     print("URL is : {0}".format(url))
@@ -132,7 +137,6 @@ def oauth_authorize(client_id, client_secret, redirect_uri):
         "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
-        "access_type": "offline",
         "code": auth_code
     }
     response = requests.post(
