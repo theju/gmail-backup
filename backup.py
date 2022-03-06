@@ -1,19 +1,16 @@
 import os
 import email
 import base64
-import random
 import mailbox
 import logging
 import asyncio
 import requests
 import argparse
 from urllib.parse import urlencode
+from oauth_utils import oauth_authorize
 
 TOKEN = {}
 loop = asyncio.get_event_loop()
-
-class ResponseException(Exception):
-    pass
 
 
 def main():
@@ -32,13 +29,16 @@ def main():
                         dest='output_maildir', help='Output Maildir')
     parser.add_argument('--debug', action='store_true', required=False,
                         default=False, dest='debug', help='Print debug info')
-
     args = parser.parse_args()
 
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 
+    scope = "https://www.googleapis.com/auth/gmail.readonly"
     oauth_authorize(
+        loop,
+        TOKEN,
+        scope,
         args.client_id,
         args.client_secret,
         args.redirect_uri
@@ -116,62 +116,6 @@ def store_messages(maildir, msgs):
         return None
 
     loop.call_soon(store_messages, *(maildir, msgs[1:]))
-
-
-def oauth_authorize(client_id, client_secret, redirect_uri):
-    state = int(random.random() * 1000)
-    params = urlencode({
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "https://www.googleapis.com/auth/gmail.readonly",
-        "state": state,
-        "access_type": "offline",
-        "prompt": "consent"
-    })
-    url = "https://accounts.google.com/o/oauth2/v2/auth?{0}".format(params)
-    print("URL is : {0}".format(url))
-    auth_code = input("Enter the authorization code: ")
-    auth_params = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "redirect_uri": redirect_uri,
-        "grant_type": "authorization_code",
-        "code": auth_code
-    }
-    response = requests.post(
-        "https://www.googleapis.com/oauth2/v4/token", data=auth_params
-    )
-    json_resp = response.json()
-    if not response.ok:
-        raise ResponseException(json_resp)
-    logging.debug(json_resp)
-    for (key, val) in json_resp.items():
-        TOKEN[key] = val
-
-    refresh_token = json_resp['refresh_token']
-    args = (client_id, client_secret, refresh_token)
-    loop.call_later((json_resp['expires_in'] - 300), oauth_renew, *args)
-
-
-def oauth_renew(client_id, client_secret, refresh_token):
-    auth_params = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-    }
-    response = requests.post(
-        "https://www.googleapis.com/oauth2/v4/token", data=auth_params
-    )
-    json_resp = response.json()
-    if not response.ok:
-        raise ResponseException(json_resp)
-    logging.debug(json_resp)
-    for (key, val) in json_resp.items():
-        TOKEN[key] = val
-    args = (client_id, client_secret, refresh_token)
-    loop.call_later((json_resp['expires_in'] - 300), oauth_renew, *args)
 
 
 if __name__ == '__main__':
